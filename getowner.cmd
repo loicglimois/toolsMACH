@@ -27,7 +27,7 @@ set REPOS_DIR=D:\workspace\MACH\ibmi
 REM Définir le fichier de sortie
 set OUTPUT_FILE=owners_list.txt
 
-set GIT_TOKEN=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
+set GIT_TOKEN=
 set prefix_git=https://api.github.com/repos/ugieiris
 set suffice_git=.git
 
