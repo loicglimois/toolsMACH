@@ -4,18 +4,50 @@ import yaml
 
 import requests
 import re
+import xml.etree.ElementTree as ET
 
-def read_token_from_file(file_path):
+def get_group_id(repertoire):
+    fic_pom = repertoire+"\\pom.xml"
+
+    print("   -- recherche group id dans: "+fic_pom)
+    try:
+        # Parse le fichier XML
+        tree = ET.parse(fic_pom)
+        root = tree.getroot()
+
+        # Recherche du groupId dans le fichier XML
+        # Le groupId est normalement dans la balise <groupId>
+        gi = root.find('{http://maven.apache.org/POM/4.0.0}groupId').text
+        if(gi):
+            print("  GI:  "+gi)           
+            return gi
+        else:
+            print("      * GroupId non trouvé")
+            return None # Si aucun groupId n'est trouvé
+    except ET.ParseError:
+        print("Erreur lors de l'analyse du fichier pom.XML.")
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier pom.xml n'a pas eté trouve dans {repertoire}.")
+    except Exception as e:
+        print(f"Une erreur s'est produite : {e}")
+    
+    return None
+
+def read_config_from_file(file_path ):
+    config = {}
     try:
         with open(file_path, 'r') as file:
-            token = file.read().strip()  # Enlever les espaces et les sauts de ligne
-        return token
+            for line in file:
+                line = line.strip()  # Supprime les espaces et les retours à la ligne
+                if ':' in line:
+                    key, value = line.split(":", 1)  # Sépare la clé et la valeur
+                    config[key] = value  # Ajoute à la hashmap (dictionnaire)
     except FileNotFoundError:
-        print(f"Le fichier {file_path} n'a pas été trouvé.")
-        return None
+        print(f"Erreur : Le fichier {file_path} n'a pas été trouvé.")
     except Exception as e:
         print(f"Erreur lors de la lecture du fichier: {file_path} - {e}")
-        return None
+    
+    return config
 
 
 def is_repo_archived(owner, repo, token):
@@ -200,13 +232,42 @@ def getRepoFromCSV(csv_input):
 
     return repos
 
-def analyseWSO2(token, dir_repo):
-    csv_filename = "D:\\workspace\\MACH2\\wso2_liste.csv"
-    fic_result   = "D:\\workspace\\MACH2\\inventaire_wso2.csv"
+def get_lines_of_code(repo,group_id, url_sonar):
+    nbloc = ""
+
+    params = {
+        "component": group_id+":"+repo+":DEVELOP",
+        "metricKeys": "ncloc"
+    }
+    # Effectuer la requête GET à l'API SonarQube
+    response = requests.get(url_sonar, params=params, verify=False)
+
+    # Si la réponse est correcte (code 200), traiter la réponse JSON
+    if response.status_code == 200:
+        data = response.json()
+        try:
+            # Extraire la valeur de 'ncloc' à partir de la réponse JSON
+            nbloc = data["component"]["measures"][0]["value"]
+            return nbloc
+        except KeyError:
+            print(f"Erreur: La métrique 'ncloc' n'a pas été trouvée pour le projet '{repo}'.")
+            return nbloc
+    else:
+        print(f"Erreur lors de la requête pour le projet '{repo}': {response.status_code}")
+        return nbloc
+
+def rapportGenEntete(f):
+    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc\n")
+
+#
+def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
+    csv_filename = "D:\\workspace\\MACH2\\liste_wso2.csv"
+    #fic_result   = "D:\\workspace\\MACH2\\inventaire_wso2.csv"
     repos = getRepoFromCSV(csv_filename)
 
-    f = open(fic_result, "w")
-    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2\n")
+    f = open(fic_result, mode)
+    if(mode == "w"):
+        rapportGenEntete(f)
 
     print("---------------------------------------------------------------------------------")
     print("analyseWSO2")
@@ -215,10 +276,21 @@ def analyseWSO2(token, dir_repo):
         chemin_complet = dir_repo + "\\" + repo
         print("- directory courant:" + repo+" - " +chemin_complet)
 
+        team_cur  = ""
+        dir_exist = False
+        is_archive  = False
+        type_bdd = "N/A"
+        nbloc    = "NE"
+
         if os.path.isdir(chemin_complet):
+            dir_exist = True
+
             team_cur = check_metadata_yaml(chemin_complet)
-            print("    "+repo+";True;"+team_cur+";False;False;False;False;False;False;False;False;False;False;False;True\n")
-            f.write(repo+";True;"+team_cur+";False;False;False;False;False;False;False;False;False;False;False;True\n")
+            is_archive = is_repo_archived(org_name, repo, token)
+
+ 
+            if(dir_exist and not is_archive ):
+                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+"\n")
             print("    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
         else:
             print(f"Repertoire non trouvé {chemin_complet}")
@@ -227,130 +299,124 @@ def analyseWSO2(token, dir_repo):
 
     return True
 
+
+
 # Fonction principale
-def analyseLegacy(token,dir_repo,org_name):
+def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
     # Nom du fichier CSV
     csv_filename = "D:\\workspace\\MACH2\\mach_tools\\liste_repo.csv"
-  
-    fic_result = "D:\\workspace\\MACH2\\liste_legacy.csv"
+    repos = getRepoFromCSV(csv_filename)
+
+    #fic_result = "D:\\workspace\\MACH2\\liste_legacy.csv"
     chaine_recherchee = 'driverClassName="com.ibm.as400.access.AS400JDBCDriver"'
 
-    # is_extjs  = False
-    # is_gwt    = False
-    # is_jsf    = False
-    # is_extjs  = False
-    # is_extjs  = False
-    # is_jsp    = False
-    # is_ibmi   = False
-    # dir_exist = False
-    # is_batch  = False
+    f = open(fic_result, mode)
+    rapportGenEntete(f)
 
     print("---------------------------------------------------------------------------------")
-    print("Debut du programme")
+    print("analyse Java Legacy")
     print("liste repo: " + csv_filename)
     print("dir_repo: " + dir_repo)
     print("---------------------------------------------------------------------------------")
 
+    for repo in repos:
+        chemin_complet = dir_repo + "\\" + repo
+        print("- directory courant:" + repo+" - " +chemin_complet)
+        #print("chemin complet :" + chemin_complet)
 
-    f = open(fic_result, "w")
-    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd\n")
+        team_cur  = ""
+        is_extjs  = False
+        is_gwt    = False
+        is_jsf    = False
+        is_struts = False
+        is_extjs  = False
+        is_extjs  = False
+        is_jsp    = False
+        is_ibmi   = False
+        dir_exist = False
+        is_batch  = False
+        is_lib    = False
+        is_webapp = False
+        is_newsocle = False
+        is_archive  = False
+        type_bdd = ""
+        nbloc = ""
 
-    # str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" 
-    # + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + "\n")
-    # Lecture du fichier CSV contenant la liste des répertoires
-    try:
-        with open(csv_filename, mode='r', newline='') as file:
-            csv_reader = csv.reader(file)
-            print("Parcours du CSV")
-            
-            for row in csv_reader:
-                if row:  # On s'assure que la ligne n'est pas vide
-                    directory = row[0].strip()
+        if os.path.isdir(chemin_complet):
+            #print(f"Exploration du répertoire : {chemin_complet}")
+            #Recherche EXT.JS
+            team_cur = check_metadata_yaml(chemin_complet)
+            #is_extjs = search_ext_subdirectories(chemin_complet)
+            is_extjs     = search_text_in_arborescence("dir", "ext-", chemin_complet, "debut")
+            is_gwt       = search_text_in_arborescence("file", ".gwt.xml", chemin_complet, "fin" )
+            is_jsf       = search_text_in_arborescence("file", "faces-config.xml", chemin_complet, "debut")
+            debut_struts = search_text_in_arborescence("file", "struts-", chemin_complet, "debut")
+            fin_struts   = search_text_in_arborescence("file", ".xml", chemin_complet, "fin")
+            is_struts    = debut_struts and fin_struts
+            has_jsp      = search_text_in_arborescence("file", ".jsp", chemin_complet, "fin")
+            if  not is_extjs and not is_gwt and  not is_jsf and  not is_struts and has_jsp :
+                is_jsp = True
+            else:
+                is_jsp = False
+            is_ibmi1      = search_text_in_arborescence("file", ".suopcml", chemin_complet, "fin")
+            is_ibmi2     = rechercher_fichiers_context_xml(chemin_complet, chaine_recherchee)
+            is_ibmi = is_ibmi1 or is_ibmi2
+            if not is_ibmi:
+                type_bdd = getTypeBdd(chemin_complet)
+            else:
+                type_bdd = "IBMi"
+            dir_exist = True
+            is_batch = chercher_contenu_dans_nom(repo,"batch")
+            is_lib   = chercher_contenu_dans_nom(repo,"agent")
+            is_webapp      = search_text_in_arborescence("dir", "webapp", chemin_complet, "fin")
+            is_newsocle_1     = search_text_in_arborescence("dir", "-ms", chemin_complet, "fin")
+            is_newsocle_2     = search_text_in_arborescence("dir", "-api", chemin_complet, "fin")
+            is_newsocle = is_newsocle_1 or is_newsocle_2
 
-                    chemin_complet = dir_repo + "\\" + directory
-                    print("- directory courant:" + directory+" - " +chemin_complet)
-                    #print("chemin complet :" + chemin_complet)
+            is_archive = is_repo_archived(org_name, repo, token)
 
-                    team_cur  = ""
-                    is_extjs  = False
-                    is_gwt    = False
-                    is_jsf    = False
-                    is_struts = False
-                    is_extjs  = False
-                    is_extjs  = False
-                    is_jsp    = False
-                    is_ibmi   = False
-                    dir_exist = False
-                    is_batch  = False
-                    is_lib    = False
-                    is_webapp = False
-                    is_newsocle = False
-                    is_archive  = False
-                    type_bdd = ""
+            group_id = get_group_id(chemin_complet)
+            if(group_id):
+                nbloc = get_lines_of_code(repo,group_id, url_sonar)
 
-                    if os.path.isdir(chemin_complet):
-                        #print(f"Exploration du répertoire : {chemin_complet}")
-                        #Recherche EXT.JS
-                        team_cur = check_metadata_yaml(chemin_complet)
-                        #is_extjs = search_ext_subdirectories(chemin_complet)
-                        is_extjs     = search_text_in_arborescence("dir", "ext-", chemin_complet, "debut")
-                        is_gwt       = search_text_in_arborescence("file", ".gwt.xml", chemin_complet, "fin" )
-                        is_jsf       = search_text_in_arborescence("file", "faces-config.xml", chemin_complet, "debut")
-                        debut_struts = search_text_in_arborescence("file", "struts-", chemin_complet, "debut")
-                        fin_struts   = search_text_in_arborescence("file", ".xml", chemin_complet, "fin")
-                        is_struts    = debut_struts and fin_struts
-                        has_jsp      = search_text_in_arborescence("file", ".jsp", chemin_complet, "fin")
-                        if  not is_extjs and not is_gwt and  not is_jsf and  not is_struts and has_jsp :
-                            is_jsp = True
-                        else:
-                            is_jsp = False
-                        is_ibmi1      = search_text_in_arborescence("file", ".suopcml", chemin_complet, "fin")
-                        is_ibmi2     = rechercher_fichiers_context_xml(chemin_complet, chaine_recherchee)
-                        is_ibmi = is_ibmi1 or is_ibmi2
-                        if not is_ibmi:
-                            type_bdd = getTypeBdd(chemin_complet)
-                        else:
-                            type_bdd = "IBMi"
-                        dir_exist = True
-                        is_batch = chercher_contenu_dans_nom(directory,"batch")
-                        is_lib   = chercher_contenu_dans_nom(directory,"agent")
-                        is_webapp      = search_text_in_arborescence("dir", "webapp", chemin_complet, "fin")
-                        is_newsocle_1     = search_text_in_arborescence("dir", "-ms", chemin_complet, "fin")
-                        is_newsocle_2     = search_text_in_arborescence("dir", "-api", chemin_complet, "fin")
-                        is_newsocle = is_newsocle_1 or is_newsocle_2
+        else:
+            print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
+            dir_exist = False
+        
+        if(dir_exist and not is_newsocle and not is_archive ):
+            f.write(repo + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + ";"+nbloc+"\n")
+        print("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
 
-                        is_archive = is_repo_archived(org_name, directory, token)
-
-                    else:
-                        print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
-                        dir_exist = False
-                    
-                    if(dir_exist and not is_newsocle and not is_archive ):
-                        f.write(directory + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + "\n")
-                    print("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
-
-    except FileNotFoundError:
-        print(f"Erreur : Le fichier {csv_filename} n'a pas été trouvé.")
-    except Exception as e:
-        print(f"Une erreur s'est produite : {e}")
     f.close()
 
 def menu():
     dir_repo = "D:\\workspace\\MACH2\\repo"
     org_name   = 'ugieiris'  # Remplacer par le nom de l'organisation
-    token = read_token_from_file("..\\config.txt")  # Remplacer par votre token GitHub
+    #fic_result = "D:\\workspace\\MACH2\\resultat_analyse.csv"
+
+    config  = read_config_from_file("..\\config.txt")  # Remplacer par votre token GitHub
+    token_git   = config["git"]
+    token_sonar = config["sonar"]
+
+    url_sonar = "https://"+token_sonar+":@sonarqube.app.prod.gcp.groupement.systeme-u.fr/api/measures/component"
 
     print("Choisissez une action :")
     print("1. Analyse des repos Java Legacy")
     print("2. Analyse des repos WSO2")
+    print("3. Analyse tous les types de repos")
     
     try:
-        choice = int(input("Entrez le numéro de votre choix (1 ou 2) : "))
-        
+        choice = int(input("Entrez le numéro de votre choix (1, 2 ou 3) : "))
+         
+        fic_result = "D:\\workspace\\MACH2\\resultat_inventaire_"+str(choice)+".csv"
+   
         if choice == 1:
-            analyseLegacy(token,dir_repo,org_name)  # Exécuter la fonction pour l'action 1
+            analyseLegacy(token_git,dir_repo,fic_result,"w",org_name,token_sonar, url_sonar)
         elif choice == 2:
-            analyseWSO2(token,dir_repo)  # Exécuter la fonction pour l'action 2
+            analyseWSO2(token_git, dir_repo,fic_result,"w",org_name,token_sonar, url_sonar)
+        elif choice == 3:
+            analyseLegacy(token_git,dir_repo,fic_result,"w",org_name,token_sonar, url_sonar)  # Exécuter la fonction pour l'action 1
+            analyseWSO2(token_git, dir_repo,fic_result,"a",org_name,token_sonar, url_sonar)
         else:
             print("Choix invalide. Veuillez entrer 1 ou 2.")
             menu()  # Redemander si le choix est invalide
