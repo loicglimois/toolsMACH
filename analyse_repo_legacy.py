@@ -6,6 +6,75 @@ import requests
 import re
 import xml.etree.ElementTree as ET
 
+
+def compter_ecrans(ext_js_directory):
+    # Expression régulière pour trouver les classes qui étendent Ext.Panel, Ext.Component, etc.
+    pattern = re.compile(r'Ext\.(?:Component|Panel|Viewport|Container)\s*=\s*Ext.extend\(\s*(\w+)\s*,', re.IGNORECASE)
+    
+    # Variable pour stocker le nombre d'écrans trouvés
+    count = 0
+
+    # Parcourir tous les fichiers JavaScript dans le répertoire spécifié
+    for root, dirs, files in os.walk(ext_js_directory):
+        for file in files:
+            if file.endswith('.js'):
+                file_path = os.path.join(root, file)
+                print(f"Analyzing file: {file_path}")
+
+                try:
+                    # Lire le contenu du fichier JavaScript
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                    #with open(file_path, 'r') as f:
+                        content = f.read()
+
+                        # Rechercher toutes les classes qui étendent Ext.Panel, Ext.Component, etc.
+                        matches = pattern.findall(content)
+                        count += len(matches)
+                except UnicodeDecodeError:
+                    # Si une erreur se produit lors de la lecture, ce n'est pas du UTF-8
+                    print("        - "+file_path+" pas en utf8")
+    print("     nb ecran trouvé: "+str(count))
+    return count
+
+def rechercher_servlets_par_chaine(web_xml, chaine):
+    nbSvt = 0;
+    try:
+        # Parse le fichier web.xml
+        tree = ET.parse(web_xml)
+        root = tree.getroot()
+
+        # Espace de noms à utiliser pour l'analyse du XML
+        namespaces = {'web': 'http://java.sun.com/xml/ns/javaee'}
+
+        # Trouver tous les éléments <servlet>
+        servlets = root.findall('web:servlet', namespaces)
+
+        # Liste pour stocker les servlets dont la classe contient la chaîne
+        servlets_trouves = []
+
+        for servlet in servlets:
+            # Trouver la balise <servlet-class>
+            servlet_class = servlet.find('web:servlet-class', namespaces)
+            if servlet_class is not None:
+                # Vérifier si la chaîne de caractères recherchée est présente dans la servlet-class
+                if chaine in servlet_class.text:
+                    # Trouver le nom de la servlet
+                    servlet_name = servlet.find('web:servlet-name', namespaces).text
+                    servlets_trouves.append(servlet_name)
+                    nbSvt += 1
+        return nbSvt
+
+    except ET.ParseError:
+        print("Erreur lors de l'analyse du fichier XML.")
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier {web_xml} n'a pas été trouvé.")
+    except Exception as e:
+        print(f"Une erreur s'est produite : {e}")
+    
+    return nbSvt
+
+
+
 def get_group_id(repertoire):
     fic_pom = repertoire+"\\pom.xml"
 
@@ -147,6 +216,20 @@ def search_ext_subdirectories(directory):
                 return True
     return False
 
+def search_webapp_in_arborescence( directory):
+    print("  -- recherche webapp dans :"+ directory)
+    chaine = "webapp"
+
+    # On parcourt les répertoires et fichiers de manière récursive
+    for root, dirs, files in os.walk(directory):
+        # On cherche les répertoires dont le nom commence par "ext-"
+
+        for curent in dirs:
+            if curent == chaine :
+                print(f"    * Trouvé dir deb: {os.path.join(root, curent)}")
+                return [True,os.path.join(root, curent)]
+    return [False,""]
+
 def search_text_in_arborescence(typeobj, chaine, directory, where ):
     
     print("  -- recherche "+typeobj+" - "+ chaine+" - "+ directory+" ou "+where)
@@ -252,12 +335,17 @@ def get_lines_of_code(repo,group_id, url_sonar):
         except KeyError:
             print(f"Erreur: La métrique 'ncloc' n'a pas été trouvée pour le projet '{repo}'.")
             return nbloc
+        except IndexError:
+            print(f"Erreur: La métrique 'ncloc' n'a pas été trouvée pour le projet '{repo}'.")
+            return nbloc
+        finally:
+            return nbloc
     else:
         print(f"Erreur lors de la requête pour le projet '{repo}': {response.status_code}")
         return nbloc
 
 def rapportGenEntete(f):
-    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc\n")
+    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran\n")
 
 #
 def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
@@ -290,7 +378,7 @@ def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar)
 
  
             if(dir_exist and not is_archive ):
-                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+"\n")
+                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+";NE;NE\n")
             print("    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
         else:
             print(f"Repertoire non trouvé {chemin_complet}")
@@ -341,6 +429,8 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
         is_archive  = False
         type_bdd = ""
         nbloc = ""
+        nb_svt = 0
+        nombre_ecrans = 0
 
         if os.path.isdir(chemin_complet):
             #print(f"Exploration du répertoire : {chemin_complet}")
@@ -348,6 +438,9 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             team_cur = check_metadata_yaml(chemin_complet)
             #is_extjs = search_ext_subdirectories(chemin_complet)
             is_extjs     = search_text_in_arborescence("dir", "ext-", chemin_complet, "debut")
+            if is_extjs:
+                nombre_ecrans = compter_ecrans(chemin_complet)
+
             is_gwt       = search_text_in_arborescence("file", ".gwt.xml", chemin_complet, "fin" )
             is_jsf       = search_text_in_arborescence("file", "faces-config.xml", chemin_complet, "debut")
             debut_struts = search_text_in_arborescence("file", "struts-", chemin_complet, "debut")
@@ -368,7 +461,7 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             dir_exist = True
             is_batch = chercher_contenu_dans_nom(repo,"batch")
             is_lib   = chercher_contenu_dans_nom(repo,"agent")
-            is_webapp      = search_text_in_arborescence("dir", "webapp", chemin_complet, "fin")
+
             is_newsocle_1     = search_text_in_arborescence("dir", "-ms", chemin_complet, "fin")
             is_newsocle_2     = search_text_in_arborescence("dir", "-api", chemin_complet, "fin")
             is_newsocle = is_newsocle_1 or is_newsocle_2
@@ -379,12 +472,19 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             if(group_id):
                 nbloc = get_lines_of_code(repo,group_id, url_sonar)
 
+            webapp      = search_webapp_in_arborescence( chemin_complet)
+            is_webapp = webapp[0]
+            if is_webapp and group_id:
+                dirWebApp = webapp[1]
+                ficWebXml = dirWebApp+"\\WEB-INF\\web.xml"
+                nb_svt = rechercher_servlets_par_chaine(ficWebXml, group_id )
+
         else:
             print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
             dir_exist = False
         
         if(dir_exist and not is_newsocle and not is_archive ):
-            f.write(repo + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + ";"+nbloc+"\n")
+            f.write(repo + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + ";"+nbloc+";"+str(nb_svt)+";"+str(nombre_ecrans)+"\n")
         print("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
 
     f.close()
