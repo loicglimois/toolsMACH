@@ -5,36 +5,302 @@ import yaml
 import requests
 import re
 import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+def count_files_with_extensions(directory, extensions):
+    """
+    Compte récursivement le nombre de fichiers avec des extensions spécifiques dans un répertoire.
+
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+        extensions (tuple): Un tuple contenant les extensions à rechercher.
+
+    Returns:
+        int: Le nombre total de fichiers trouvés avec les extensions spécifiées.
+    """
+    file_count = 0
+
+    print("      - jsp: ",extensions)
+
+    # Parcourir tous les fichiers dans le répertoire et ses sous-répertoires
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # Vérifier si l'extension du fichier est dans la liste des extensions
+            if file.endswith(extensions):
+                file_count += 1
+
+    print("      - jsp:  nb: "+str(file_count))
+    return file_count
+
+def count_jsp_occurrences_in_faces_config(directory):
+    """
+    Recherche récursivement un fichier faces-config.xml dans un répertoire donné
+    et compte le nombre d'occurrences de la chaîne '.jsp' dans ce fichier.
+
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+
+    Returns:
+        int: Le nombre d'occurrences de '.jsp' dans le fichier faces-config.xml.
+    """
+    jsp_count = 0
+    faces_config_found = False
+
+    print("      - jsp: recherche des .jsp dans fichier faces-config.xml")
+
+    # Parcourir tous les fichiers dans le répertoire
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file == 'faces-config.xml':
+                faces_config_found = True
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # Compter les occurrences de '.jsp'
+                        jsp_count += content.count('.jsp')
+                except Exception as e:
+                    print(f"Erreur lors de la lecture du fichier {file_path}: {e}")
+
+    if not faces_config_found:
+        print("Aucun fichier faces-config.xml trouvé dans le répertoire spécifié.")
+
+    print("        jps trouve:"+str(jsp_count))
+    return jsp_count
 
 
-def compter_ecrans(ext_js_directory):
-    # Expression régulière pour trouver les classes qui étendent Ext.Panel, Ext.Component, etc.
-    pattern = re.compile(r'Ext\.(?:Component|Panel|Viewport|Container)\s*=\s*Ext.extend\(\s*(\w+)\s*,', re.IGNORECASE)
+def count_screen_jsf(base_dir):
+    """
+    Compte les fichiers .xhtml dans une application JSF.
     
-    # Variable pour stocker le nombre d'écrans trouvés
-    count = 0
+    :param base_dir: Répertoire racine de l'application JSF.
+    :return: Nombre total de fichiers .xhtml trouvés.
+    """
+    print("      - jsp: recherche des fichier .xhtml")
 
-    # Parcourir tous les fichiers JavaScript dans le répertoire spécifié
+    total_ecrans = 0
+    for root, _, files in os.walk(base_dir):
+        for file in files:
+            if file.endswith('.xhtml'):
+                total_ecrans += 1
+    
+    print("          - nb ihm: .xhtml: "+str(total_ecrans))
+    return total_ecrans
+
+
+def get_jenkinsfile_deployer(directory, filename="Jenkinsfile"):
+    """
+    Lit un fichier Jenkinsfile et extrait la valeur de la variable 'deployer'.
+
+    Args:
+    directory (str): Chemin du répertoire contenant le Jenkinsfile.
+    filename (str): Nom du fichier Jenkinsfile (par défaut "Jenkinsfile").
+
+    Returns:
+    tuple: (bool, str) - (True si trouvé, valeur de 'deployer') ou (False, None) si non trouvé.
+    """
+    file_path = os.path.join(directory, filename)
+    
+    if not os.path.exists(file_path):
+        print(f"Le fichier {filename} n'existe pas dans le répertoire spécifié.")
+        return False, None
+
+    try:
+        with open(file_path, 'r') as file:
+            content = file.read()
+            
+            # Recherche de la variable 'deployer' avec une expression régulière
+            match = re.search(r"deployer\s*:\s*'([^']*)'", content)
+            
+            if match:
+                deployer_value = match.group(1)
+                return True, deployer_value
+            else:
+                print("Variable 'deployer' non trouvée dans le fichier.")
+                return False, None
+    
+    except Exception as e:
+        print(f"Erreur lors de la lecture du fichier : {e}")
+        return False, None
+
+
+def detect_encoding_with_bom(file_path):
+    """
+    Détecte l'encodage d'un fichier en vérifiant le BOM et en ajoutant la détection pour ISO-8859 et ANSI.
+    """
+    with open(file_path, 'rb') as file:
+        raw_data = file.read(4)  # Lire les 4 premiers octets
+        if raw_data.startswith(b'\xef\xbb\xbf'):
+            # print(" detect_encoding_with_bom: utf8")
+            return 'utf-8-sig'
+        elif raw_data.startswith(b'\xff\xfe'):
+            # print(" detect_encoding_with_bom: utf16-le")
+            return 'utf-16-le'
+        elif raw_data.startswith(b'\xfe\xff'):
+            # print(" detect_encoding_with_bom: utf16-be")
+            return 'utf-16-be'
+        elif raw_data.startswith(b'\xff\xfe\x00\x00'):
+            # print(" detect_encoding_with_bom: utf32 le")
+            return 'utf-32-le'
+        elif raw_data.startswith(b'\x00\x00\xfe\xff'):
+            # print(" detect_encoding_with_bom: utf32 be")
+            return 'utf-32-be'
+        else:
+            # Vérification supplémentaire pour ISO-8859 et ANSI
+            file.seek(0)  # Retourner au début du fichier
+            content = file.read()
+            try:
+                content.decode('iso-8859-1')
+                # print(" detect_encoding_with_bom: iso-8859")
+                return 'iso-8859-1'
+            except UnicodeDecodeError:
+                try:
+                    content.decode('cp1252')  # ANSI (Windows-1252)
+                    # print(" detect_encoding_with_bom: ANSI")
+                    return 'cp1252'
+                except UnicodeDecodeError:
+                    return 'unknown'
+
+
+def count_screen_struts3(directory):
+    """
+    Compte le nombre d'IHM (interfaces utilisateur) dans une application Struts 2.
+    
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+    
+    Returns:
+        dict: Un dictionnaire contenant le nombre total d'IHM et la liste des JSP associées.
+    """
+    #action_pattern = r'<action\s+name="([^"]+)"\s+class="([^"]+)">'
+    #action_pattern = r'<action\s+name="([^"]+)"'
+    #result_pattern = r'<result\s+name="[^"]*">([^<]+)\.jsp</result>'
+    result_pattern = r'<result>([^<]+)\.jsp</result>'
+
+    #result_pattern = r'\.jsp</result>'
+    #result_pattern = r'<result\s+name="[^"]*"'
+
+    ihm_count = 0
+    jsp_files = set()
+    actions = defaultdict(list)
+
+    print("      - comptage ecran Struts 2")
+
+    # Parcourir tous les fichiers du répertoire
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if re.match(r'struts.*\.xml', file):  # Rechercher struts*.xml
+                file_path = os.path.join(root, file)
+                print("        - fichier a analyser:"+file_path)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                    #with open(file_path, 'r', encoding=detect_encoding_with_bom(file_path) ) as f:
+                        content = f.read()
+                        print("         lecture fichier: ")
+
+                        for result in re.finditer(result_pattern, content):
+                            ihm_cur = result.group(1)
+                            if( not ihm_cur in jsp_files):
+                                jsp_files.add(ihm_cur)
+                                ihm_count += 1
+
+                except Exception as e:
+                    print(f"Erreur lors de la lecture du fichier {file_path}: {e}")
+
+    #ihm_count = len(jsp_files)
+    print("              nb imh struts2: "+str(ihm_count))
+    #return {"total_ihm": ihm_count, "jsp_files": list(jsp_files)}
+    return ihm_count
+
+def count_screen_struts1(directory):
+    """Compter le nombre d'écrans dans une application Struts 1."""
+    print("      - comptage ecran Struts 1")
+    screen_count = 0
+    # Expression régulière pour détecter les définitions d'écrans dans les fichiers JSP
+    jsp_pattern = r'<jsp:include\s+page="([^"]+)"'
+    # Expression régulière pour détecter les actions dans le fichier struts-config.xml
+    action_pattern = r'<action\s+path="([^"]+)"'
+
+    # Parcourir tous les fichiers dans le répertoire
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.jsp'):  # Considérer uniquement les fichiers JSP
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding=detect_encoding_with_bom(file_path) ) as f:
+                        content = f.read()
+                        # Compter les inclusions d'écrans dans le fichier JSP
+                        screens_in_jsp = re.findall(jsp_pattern, content)
+                        screen_count += len(screens_in_jsp)
+                except UnicodeDecodeError:
+                    # Si une erreur se produit lors de la lecture, ce n'est pas du UTF-8
+                    print("        - "+file_path+" pas en utf8")
+
+            elif re.match(r'struts-config-\w+\.xml', file):  # Vérifier le fichier de configuration Struts
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # Compter les actions qui représentent des écrans
+                        actions_in_config = re.findall(action_pattern, content)
+                        screen_count += len(actions_in_config)
+                except UnicodeDecodeError:
+                    # Si une erreur se produit lors de la lecture, ce n'est pas du UTF-8
+                    print("        - "+file_path+" pas en utf8")
+
+    print("        - ecran Struts 1: "+str(screen_count))
+    return screen_count
+
+
+def count_screen_gwt(directory):
+    """Compter le nombre d'écrans GWT dans tous les fichiers Java d'un répertoire donné."""
+    print("      -- compter_ecrans GWT "+directory)
+    screen_count = 0
+    screen_patterns = [
+        r'class\s+\w+\s+extends\s+(AbstractSuGwtPresenter)'
+    ]
+
+    # Parcourir tous les fichiers dans le répertoire
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.java'):  # Considérer uniquement les fichiers Java
+                file_path = os.path.join(root, file)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Vérifier chaque motif pour détecter les écrans
+                    for pattern in screen_patterns:
+                        if re.search(pattern, content):
+                            screen_count += 1
+                            break  # Compte chaque fichier une seule fois
+
+    print("     nb ecran trouvé: "+str(screen_count))
+    return screen_count
+
+def count_screen_extjs(ext_js_directory):
+    print("      -- compter_ecrans Ext.js "+ext_js_directory)
+
+    screen_count = 0
+
+    screen_components = ['Ext.Panel', 'Ext.Viewport', 'Ext.Window', 'Ext.TabPanel']
+
     for root, dirs, files in os.walk(ext_js_directory):
         for file in files:
             if file.endswith('.js'):
                 file_path = os.path.join(root, file)
-                print(f"Analyzing file: {file_path}")
+                #print(f"Analyzing file: {file_path}")
 
                 try:
-                    # Lire le contenu du fichier JavaScript
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                    #with open(file_path, 'r') as f:
-                        content = f.read()
-
-                        # Rechercher toutes les classes qui étendent Ext.Panel, Ext.Component, etc.
-                        matches = pattern.findall(content)
-                        count += len(matches)
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        content = file.read()
+                        for component in screen_components:
+                            if component in content:
+                                screen_count += 1
                 except UnicodeDecodeError:
                     # Si une erreur se produit lors de la lecture, ce n'est pas du UTF-8
                     print("        - "+file_path+" pas en utf8")
-    print("     nb ecran trouvé: "+str(count))
-    return count
+
+    print("     nb ecran trouvé: "+str(screen_count))
+    return screen_count
 
 def rechercher_servlets_par_chaine(web_xml, chaine):
     nbSvt = 0;
@@ -230,14 +496,134 @@ def search_webapp_in_arborescence( directory):
                 return [True,os.path.join(root, curent)]
     return [False,""]
 
+#version_extjs = search_extjs( chemin_complet)
+def search_extjs( chemin_complet):
+    print("  -- recherche ext-  :"+ chemin_complet)
+
+    pattern = r'ext-(\d+(\.\d+)*(\.\d+)?)'
+
+    # On parcourt les répertoires et fichiers de manière récursive
+    for root, dirs, files in os.walk(chemin_complet):
+        # On cherche les répertoires dont le nom commence par "ext-"
+        for curent in dirs:
+            match = re.search(pattern, curent)
+            if match:
+                return match.group(1)
+    return ""
+
+def analyze_struts_version_v2(directory):
+    """
+    Recherche les chaînes "struts-config_1" et "struts-_2" dans tous les fichiers d'un répertoire donné.
+
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+
+    Returns:
+        dict: Un dictionnaire avec les chaînes recherchées comme clés et les fichiers correspondants comme valeurs.
+    """
+    # Chaînes à rechercher
+    patterns = {
+        "1": r'struts-config_1',
+        "2": r'struts-2'
+    }
+
+    print("    - test struts")
+
+    # Dictionnaire pour stocker les résultats
+    #results = {key: [] for key in patterns.keys()}
+
+    # Parcourir tous les fichiers dans le répertoire et ses sous-répertoires
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            try:
+                # Essayer d'ouvrir le fichier avec différents encodages
+                for encoding in ['utf-8', 'iso-8859-1', 'cp1252']:
+                    try:
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            content = f.read()
+                            # Vérifier chaque chaîne recherchée
+                            for key, pattern in patterns.items():
+                                if re.search(pattern, content):
+                                    print("       - resultat: fichier config struts: "+file_path+ " V:"+key)
+                                    return [True,key]
+                                    # results[key].append(file_path)
+                                    # break  # Sortir de la boucle des encodages si une correspondance est trouvée
+                    except UnicodeDecodeError:
+                        continue  # Essayer l'encodage suivant si celui-ci échoue
+                    break  # Sortir de la boucle des encodages si la lecture réussit
+            except Exception as e:
+                print(f"Erreur lors de la lecture du fichier {file_path}: {e}")
+
+#    return results
+    return [False, "NA"]
+
+
+
+def analyze_struts_version(directory):
+    # struts1_pattern = r'http://struts\.apache\.org/dtds/struts-config_1[a-zA-Z0-9]+\.dtd'
+    # struts2_pattern = r'http://struts\.apache\.org/dtds/struts-2[a-zA-Z0-9]+\.dtd'
+    struts1_found = False
+    struts2_found = False
+
+    print("    - test struts")
+
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if re.match(r'struts.*\.xml', file):
+                file_path = os.path.join(root, file)
+                print("       - fichier config struts: "+file_path)
+
+                try:
+                    # with open(file_path, 'r', encoding=detect_encoding_with_bom(file_path)) as f:
+                    with open(file_path, 'r') as f:
+                        print("      - recherche des dtd")
+                        # content = f.read()
+                        # if re.search(struts1_pattern, content):
+                        #     struts1_found = True
+                        # if re.search(struts2_pattern, content):
+                        #     istruts = True
+                        #     struts2_found = True
+                        # if struts1_found and struts2_found:
+                        #     break
+                        for line in f:
+                            print("          line: "+line)
+                            #if re.search(struts1_pattern, line):
+                            if line.find("struts-config-1") != -1:
+                                print("          line trouve: "+line)
+                                struts1_found = True
+                                break
+                            if line.find("struts-2") != -1:
+                                print("          line trouve: "+line)
+                                struts2_found = True
+                                break
+                            if struts1_found and struts2_found:
+                                break
+                except UnicodeDecodeError:
+                    print(f"le fichier n'est pas en utf8")
+                except Exception as e:
+                    print(f"Erreur lors de la lecture du fichier {file_path}: {e}")
+
+    if struts1_found and not struts2_found:
+        version = "1"
+    elif struts2_found and not struts1_found:
+        version = "2"
+    elif struts1_found and struts2_found:
+        version = "1 et 2"
+    else:
+        version = "N/A"
+    
+    print("      - version struts: "+ version )
+
+    return [(struts1_found or struts1_found) ,version]
+
 def search_text_in_arborescence(typeobj, chaine, directory, where ):
     
-    print("  -- recherche "+typeobj+" - "+ chaine+" - "+ directory+" ou "+where)
+    print("  -- recherche "+typeobj+" - "+ chaine+" - "+ directory+" -"+where)
     
     if( typeobj == "dir" and directory.find(chaine) != -1 ):
         print(f"    * Trouvé "+chaine +" dans " + directory)
         return True
-    #print("    -- debut recursif "+directory)
       
     # On parcourt les répertoires et fichiers de manière récursive
     for root, dirs, files in os.walk(directory):
@@ -245,6 +631,9 @@ def search_text_in_arborescence(typeobj, chaine, directory, where ):
 
         if(typeobj == "dir"):
             for curent in dirs:
+                # if re.match(rf'{re.escape(chaine)}', curent):
+                #     print(f"    * Trouvé dir deb: {os.path.join(root, curent)}")
+                #     return True
                 if where == "debut":
                     if curent.find(chaine) != -1 :
                         print(f"    * Trouvé dir deb: {os.path.join(root, curent)}")
@@ -255,6 +644,10 @@ def search_text_in_arborescence(typeobj, chaine, directory, where ):
                         return True
         if(typeobj == "file"):
             for curent in files:
+                # if re.match(rf'{re.escape(chaine)}', curent):
+                #     print(f"    * Trouvé dir deb: {os.path.join(root, curent)}")
+                #     return True
+
                 if where == "debut":
                     if curent.find(chaine) != -1 :
                         print(f"    * Trouvé fic deb: {os.path.join(root, curent)}")
@@ -264,7 +657,6 @@ def search_text_in_arborescence(typeobj, chaine, directory, where ):
                         print(f"    * Trouvé fic fin: {os.path.join(root, curent)}")
                         return True 
     return False
-
 
 
 # Fonction pour rechercher et lire le fichier metadata.yaml
@@ -345,7 +737,7 @@ def get_lines_of_code(repo,group_id, url_sonar):
         return nbloc
 
 def rapportGenEntete(f):
-    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran\n")
+    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran_ext;version_extjs;nb_ecran_gwt;nb_ecran_jsf;nb_ecran_st;version_st;nb_jsp;deploiement\n")
 
 #
 def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
@@ -378,7 +770,7 @@ def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar)
 
  
             if(dir_exist and not is_archive ):
-                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+";NE;NE\n")
+                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+";NE;NE;NE;NE;NE;NE;NE;NE;NE\n")
             print("    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
         else:
             print(f"Repertoire non trouvé {chemin_complet}")
@@ -430,7 +822,14 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
         type_bdd = ""
         nbloc = ""
         nb_svt = 0
-        nombre_ecrans = 0
+        nombre_ecrans_ext = 0
+        nombre_ecrans_gwt = 0
+        version_extjs = "N/A"
+        nombre_ecrans_struts = 0
+        version_struts = "N/A"
+        nombre_ecran_jsf = 0
+        nb_jsp           = 0
+        deploiement = "NE"
 
         if os.path.isdir(chemin_complet):
             #print(f"Exploration du répertoire : {chemin_complet}")
@@ -439,18 +838,39 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             #is_extjs = search_ext_subdirectories(chemin_complet)
             is_extjs     = search_text_in_arborescence("dir", "ext-", chemin_complet, "debut")
             if is_extjs:
-                nombre_ecrans = compter_ecrans(chemin_complet)
+                version_extjs = search_extjs( chemin_complet)
+                nombre_ecrans_ext = count_screen_extjs(chemin_complet)
 
             is_gwt       = search_text_in_arborescence("file", ".gwt.xml", chemin_complet, "fin" )
+            if is_gwt:
+                nombre_ecrans_gwt = count_screen_gwt(chemin_complet)
             is_jsf       = search_text_in_arborescence("file", "faces-config.xml", chemin_complet, "debut")
-            debut_struts = search_text_in_arborescence("file", "struts-", chemin_complet, "debut")
-            fin_struts   = search_text_in_arborescence("file", ".xml", chemin_complet, "fin")
-            is_struts    = debut_struts and fin_struts
+            if is_jsf:
+                nombre_ecran_jsf =  count_screen_jsf(chemin_complet)
+                nombre_ecran_jsf += count_jsp_occurrences_in_faces_config(chemin_complet)
+
+            test_struts = analyze_struts_version_v2(chemin_complet)
+            is_struts      = test_struts[0]
+            if is_struts:
+                version_struts = test_struts[1]
+
+                if test_struts[1] == "1":
+                    nombre_ecrans_struts = count_screen_struts1(chemin_complet)
+                elif test_struts[1] == "2":
+                    nombre_ecrans_struts = count_screen_struts3(chemin_complet)
+
+
             has_jsp      = search_text_in_arborescence("file", ".jsp", chemin_complet, "fin")
-            if  not is_extjs and not is_gwt and  not is_jsf and  not is_struts and has_jsp :
-                is_jsp = True
-            else:
-                is_jsp = False
+            
+            if  not is_extjs and not is_gwt and  not is_jsf and  not is_struts:
+                extensions = ('.jsp', '.html', '.htm')
+                nb_jsp = count_files_with_extensions(chemin_complet, extensions)
+                if nb_jsp > 0:
+                    is_jsp = True
+                else:
+                    is_jsp = False    
+                
+
             is_ibmi1      = search_text_in_arborescence("file", ".suopcml", chemin_complet, "fin")
             is_ibmi2     = rechercher_fichiers_context_xml(chemin_complet, chaine_recherchee)
             is_ibmi = is_ibmi1 or is_ibmi2
@@ -479,12 +899,16 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
                 ficWebXml = dirWebApp+"\\WEB-INF\\web.xml"
                 nb_svt = rechercher_servlets_par_chaine(ficWebXml, group_id )
 
+            get_deploiement = get_jenkinsfile_deployer(chemin_complet, "Jenkinsfile")
+            if get_deploiement[0]:
+                deploiement = get_deploiement[1]
+
         else:
             print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
             dir_exist = False
         
         if(dir_exist and not is_newsocle and not is_archive ):
-            f.write(repo + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + ";"+nbloc+";"+str(nb_svt)+";"+str(nombre_ecrans)+"\n")
+            f.write(repo + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + ";"+nbloc+";"+str(nb_svt)+";"+str(nombre_ecrans_ext)+";"+str(version_extjs)+";"+str(nombre_ecrans_gwt)+";"+str(nombre_ecran_jsf)+";"+str(nombre_ecrans_struts)+";"+str(version_struts)+";"+str(nb_jsp)+";"+deploiement+"\n")
         print("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
 
     f.close()
