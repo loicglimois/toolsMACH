@@ -7,6 +7,32 @@ import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
+def count_files_with_extensions_hors(directory, extensions,hors):
+    """
+    Compte récursivement le nombre de fichiers avec des extensions spécifiques dans un répertoire.
+
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+        extensions (tuple): Un tuple contenant les extensions à rechercher.
+
+    Returns:
+        int: Le nombre total de fichiers trouvés avec les extensions spécifiées.
+    """
+    file_count = 0
+
+    print("      - count_files_with_extensions: ",extensions)
+
+    # Parcourir tous les fichiers dans le répertoire et ses sous-répertoires
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            # Vérifier si l'extension du fichier est dans la liste des extensions
+            if file.endswith(extensions) and not hors in file_path:
+                file_count += 1
+
+    print("      - count_files_with_extensions:  nb: "+str(file_count))
+    return file_count
+
 def count_files_with_extensions(directory, extensions):
     """
     Compte récursivement le nombre de fichiers avec des extensions spécifiques dans un répertoire.
@@ -20,7 +46,7 @@ def count_files_with_extensions(directory, extensions):
     """
     file_count = 0
 
-    print("      - jsp: ",extensions)
+    print("      - count_files_with_extensions: ",extensions)
 
     # Parcourir tous les fichiers dans le répertoire et ses sous-répertoires
     for root, dirs, files in os.walk(directory):
@@ -29,7 +55,7 @@ def count_files_with_extensions(directory, extensions):
             if file.endswith(extensions):
                 file_count += 1
 
-    print("      - jsp:  nb: "+str(file_count))
+    print("      - count_files_with_extensions:  nb: "+str(file_count))
     return file_count
 
 def count_jsp_occurrences_in_faces_config(directory):
@@ -257,7 +283,8 @@ def count_screen_gwt(directory):
     print("      -- compter_ecrans GWT "+directory)
     screen_count = 0
     screen_patterns = [
-        r'class\s+\w+\s+extends\s+(AbstractSuGwtPresenter)'
+        # r'class\s+\w+\s+extends\s+(AbstractSuGwtPresenter)'
+        r'@UiTemplate'
     ]
 
     # Parcourir tous les fichiers dans le répertoire
@@ -281,23 +308,29 @@ def count_screen_extjs(ext_js_directory):
 
     screen_count = 0
 
-    screen_components = ['Ext.Panel', 'Ext.Viewport', 'Ext.Window', 'Ext.TabPanel']
+    # screen_components = ['Ext.Panel', 'Ext.Viewport', 'Ext.Window', 'Ext.TabPanel']
+    screen_components = ['Ext.Window']
 
     for root, dirs, files in os.walk(ext_js_directory):
         for file in files:
-            if file.endswith('.js'):
+            if file.endswith('.js') or file.endswith('.jsp') :
                 file_path = os.path.join(root, file)
-                #print(f"Analyzing file: {file_path}")
+                if (not "ext-" in file_path): 
+                    #print(f"Analyzing file: {file_path}")
 
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        content = file.read()
-                        for component in screen_components:
-                            if component in content:
-                                screen_count += 1
-                except UnicodeDecodeError:
-                    # Si une erreur se produit lors de la lecture, ce n'est pas du UTF-8
-                    print("        - "+file_path+" pas en utf8")
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as file:
+                            for line in file:
+                                for component in screen_components:
+                                    if component in line:
+                                        screen_count += 1  
+                                # content = file.read()
+                                # for component in screen_components:
+                                #     if component in content:
+                                #         screen_count += 1
+                    except UnicodeDecodeError:
+                        # Si une erreur se produit lors de la lecture, ce n'est pas du UTF-8
+                        print("        - "+file_path+" pas en utf8")
 
     print("     nb ecran trouvé: "+str(screen_count))
     return screen_count
@@ -353,12 +386,14 @@ def get_group_id(repertoire):
         # Recherche du groupId dans le fichier XML
         # Le groupId est normalement dans la balise <groupId>
         gi = root.find('{http://maven.apache.org/POM/4.0.0}groupId').text
-        if(gi):
-            print("  GI:  "+gi)           
-            return gi
+        ai = root.find('{http://maven.apache.org/POM/4.0.0}artifactId').text
+        if(gi and ai):
+            print("  groupId:    "+gi)           
+            print("  artifactId: "+ai)
+            return [True,gi,ai]
         else:
-            print("      * GroupId non trouvé")
-            return None # Si aucun groupId n'est trouvé
+            print("      * GroupId et artifactId non trouvé")
+            return [False, None, None] # Si aucun groupId n'est trouvé
     except ET.ParseError:
         print("Erreur lors de l'analyse du fichier pom.XML.")
     except FileNotFoundError:
@@ -366,7 +401,7 @@ def get_group_id(repertoire):
     except Exception as e:
         print(f"Une erreur s'est produite : {e}")
     
-    return None
+    return [False, None, None]
 
 def read_config_from_file(file_path ):
     config = {}
@@ -508,7 +543,7 @@ def search_extjs( chemin_complet):
         for curent in dirs:
             match = re.search(pattern, curent)
             if match:
-                return match.group(1)
+                return "'"+match.group(1)+"'"
     return ""
 
 def analyze_struts_version_v2(directory):
@@ -707,11 +742,11 @@ def getRepoFromCSV(csv_input):
 
     return repos
 
-def get_lines_of_code(repo,group_id, url_sonar):
+def get_lines_of_code(repo,group_id,artifact_id, url_sonar):
     nbloc = ""
 
     params = {
-        "component": group_id+":"+repo+":DEVELOP",
+        "component": group_id+":"+artifact_id+":DEVELOP",
         "metricKeys": "ncloc"
     }
     # Effectuer la requête GET à l'API SonarQube
@@ -735,6 +770,86 @@ def get_lines_of_code(repo,group_id, url_sonar):
     else:
         print(f"Erreur lors de la requête pour le projet '{repo}': {response.status_code}")
         return nbloc
+
+#Pour compter les API pour GWT
+def count_methods_in_remote_service_classes(directory):
+    """
+    Recherche récursivement des fichiers .java dans un répertoire donné,
+    vérifie si les classes étendent RemoteService et compte le nombre de méthodes.
+
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+
+    Returns:
+        int: Le nombre total de méthodes dans les classes qui étendent RemoteService.
+    """
+    total_methods = 0
+    class_pattern = re.compile(r'interface\s+(\w+)\s+extends\s+RemoteService')
+    #method_pattern = re.compile(r'\b(public|protected|private|static|final)?\s*\w+\s+\w+\s*\(.*\)\s*{')
+    #method_pattern = re.compile(r'\w+\s+\w+\s*\(.*\)\s*;')
+    #method_pattern = re.compile(r'\w+(?:<[^>]+>)?\s+\w+\s*\(.*?\)\s*;')
+    method_pattern = re.compile(r'\b\w+(?:<[^>]+>)?\s+\w+\s*\(.*?\)\s*(?:throws\s+\w+(?:\s*,\s*\w+)*)?;')
+
+    print("      - Cherche API GWT")
+
+    # Parcourir tous les fichiers dans le répertoire et ses sous-répertoires
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.java'):
+                file_path = os.path.join(root, file)
+                #print("      - fichier Java: "+file_path)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        
+                        # Vérifier si la classe étend RemoteService
+                        if class_pattern.search(content):
+                            # print("      - classe qui etend RemoteService: "+file_path)
+                            # Compter les méthodes dans cette classe
+                            methods = method_pattern.findall(content)
+                            print("        - nb methode"+str(len(methods)))
+                            total_methods += len(methods)
+
+                except Exception as e:
+                    print(f"Erreur lors de la lecture du fichier {file_path}: {e}")
+
+    print("      - nb methodes trouvées: "+str(total_methods))
+    return total_methods
+
+
+#Pour compter les API pour EXT.js  
+def count_method_lines_in_dwr_xml(directory):
+    """
+    Recherche récursivement des fichiers nommés *.dwr.xml dans un répertoire donné
+    et compte le nombre de lignes contenant 'methode="'.
+
+    Args:
+        directory (str): Le chemin du répertoire à analyser.
+
+    Returns:
+        int: Le nombre total de lignes contenant 'methode="' dans les fichiers .dwr.xml trouvés.
+    """
+
+    print("      - recherche method dans dwr.xml")
+    total_count = 0
+
+    # Parcourir tous les fichiers dans le répertoire et ses sous-répertoires
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('dwr.xml') or file.endswith('ihm.xml') :
+                file_path = os.path.join(root, file)
+                try:
+                    print("      - parcour du fichier "+file_path)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        # Compter les lignes contenant 'methode="'
+                        for line in f:
+                            if 'method="' in line:
+                                total_count += 1
+                except Exception as e:
+                    print(f"Erreur lors de la lecture du fichier {file_path}: {e}")
+
+    return total_count
+
 
 def rapportGenEntete(f):
     f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran_ext;version_extjs;nb_ecran_gwt;nb_ecran_jsf;nb_ecran_st;version_st;nb_jsp;deploiement\n")
@@ -840,6 +955,9 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             if is_extjs:
                 version_extjs = search_extjs( chemin_complet)
                 nombre_ecrans_ext = count_screen_extjs(chemin_complet)
+                if nombre_ecrans_ext == 0:
+                    extensions = ('.jsp')
+                    nombre_ecrans_ext = count_files_with_extensions_hors(chemin_complet, extensions, "ext-")
 
             is_gwt       = search_text_in_arborescence("file", ".gwt.xml", chemin_complet, "fin" )
             if is_gwt:
@@ -860,7 +978,7 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
                     nombre_ecrans_struts = count_screen_struts3(chemin_complet)
 
 
-            has_jsp      = search_text_in_arborescence("file", ".jsp", chemin_complet, "fin")
+            #has_jsp      = search_text_in_arborescence("file", ".jsp", chemin_complet, "fin")
             
             if  not is_extjs and not is_gwt and  not is_jsf and  not is_struts:
                 extensions = ('.jsp', '.html', '.htm')
@@ -889,15 +1007,22 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             is_archive = is_repo_archived(org_name, repo, token)
 
             group_id = get_group_id(chemin_complet)
-            if(group_id):
-                nbloc = get_lines_of_code(repo,group_id, url_sonar)
+            if(group_id[0]):
+                nbloc = get_lines_of_code(repo,group_id[1],group_id[2], url_sonar)
 
             webapp      = search_webapp_in_arborescence( chemin_complet)
+            
             is_webapp = webapp[0]
             if is_webapp and group_id:
-                dirWebApp = webapp[1]
-                ficWebXml = dirWebApp+"\\WEB-INF\\web.xml"
-                nb_svt = rechercher_servlets_par_chaine(ficWebXml, group_id )
+                # dirWebApp = webapp[1]
+                # ficWebXml = dirWebApp+"\\WEB-INF\\web.xml"
+                # nb_svt = rechercher_servlets_par_chaine(ficWebXml, group_id )
+                nb_svt = 0
+                if( is_extjs):
+                    nb_svt += count_method_lines_in_dwr_xml(chemin_complet)
+                if(is_gwt):
+                    extensions = ('.jsp', '.html', '.htm')
+                    nb_svt = count_methods_in_remote_service_classes(chemin_complet)
 
             get_deploiement = get_jenkinsfile_deployer(chemin_complet, "Jenkinsfile")
             if get_deploiement[0]:
