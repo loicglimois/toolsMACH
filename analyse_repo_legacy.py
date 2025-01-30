@@ -807,7 +807,7 @@ def count_methods_in_remote_service_classes(directory):
                             # print("      - classe qui etend RemoteService: "+file_path)
                             # Compter les méthodes dans cette classe
                             methods = method_pattern.findall(content)
-                            print("        - nb methode"+str(len(methods)))
+                            #print("        - nb methode"+str(len(methods)))
                             total_methods += len(methods)
 
                 except Exception as e:
