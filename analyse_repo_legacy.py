@@ -471,6 +471,7 @@ def rechercher_driver(fichier):
 #type_bdd = getTypeBdd(chemin_complet)
 def getTypeBdd(dossier):
     """Recherche récursive de tous les fichiers context.xml dans un dossier et vérifie le contenu."""
+    print(f"getTypeBdd {dossier}")
     for root, dirs, files in os.walk(dossier):
         for file in files:
             if file == 'dbpools.properties':
@@ -478,12 +479,14 @@ def getTypeBdd(dossier):
                 #Cherche fichier pour Batch
                 type = rechercher_driver(chemin_fichier)
                 if not type == "unknow":
+                    print(f"      - type bdd trouve: {type}")
                     return type
 
     return "unknow"
 
 def rechercher_fichiers_context_xml(dossier, chaine):
     """Recherche récursive de tous les fichiers context.xml dans un dossier et vérifie le contenu."""
+    print(f"     - rechercher_fichiers_context_xml: {dossier} - {chaine}")
     for root, dirs, files in os.walk(dossier):
         for file in files:
             if file == 'context.xml':
@@ -530,6 +533,8 @@ def search_webapp_in_arborescence( directory):
                 print(f"    * Trouvé dir deb: {os.path.join(root, curent)}")
                 return [True,os.path.join(root, curent)]
     return [False,""]
+
+
 
 #version_extjs = search_extjs( chemin_complet)
 def search_extjs( chemin_complet):
@@ -850,9 +855,40 @@ def count_method_lines_in_dwr_xml(directory):
 
     return total_count
 
+def find_dockerfiles_in_directory(directory):
+    dockerfiles = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower() == "dockerfile":  # Si c'est un Dockerfile
+                dockerfiles.append(os.path.join(root, file))
+    return dockerfiles
+
+def get_from_image(dockerfile_path):
+    with open(dockerfile_path, 'r') as file:
+        lines = file.readlines()
+
+    for line in lines:
+        line = line.strip()
+        # Recherche du mot-clé "FROM" suivi d'une image (et éventuellement d'une version ou d'une étiquette)
+        match = re.match(r"^FROM\s+([^\s]+)", line)
+        if match:
+            return match.group(1)  # Retourne l'image après "FROM"
+    return None
+
+def extract_docker_images_from_directory(directory):
+    dockerfiles = find_dockerfiles_in_directory(directory)
+    images = {}
+
+    for dockerfile in dockerfiles:
+        image = get_from_image(dockerfile)
+        if image:
+            images[dockerfile] = image
+    
+    return images
+
 
 def rapportGenEntete(f):
-    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran_ext;version_extjs;nb_ecran_gwt;nb_ecran_jsf;nb_ecran_st;version_st;nb_jsp;deploiement\n")
+    f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran_ext;version_extjs;nb_ecran_gwt;nb_ecran_jsf;nb_ecran_st;version_st;nb_jsp;deploiement;docker\n")
 
 #
 def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
@@ -885,7 +921,7 @@ def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar)
 
  
             if(dir_exist and not is_archive ):
-                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+";NE;NE;NE;NE;NE;NE;NE;NE;NE\n")
+                f.write(repo+";"+str(dir_exist)+";"+team_cur+";False;False;False;False;False;False;False;False;False;False;"+str(is_archive)+";True;"+type_bdd+";"+nbloc+";NE;NE;NE;NE;NE;NE;NE;NE;NE;NE\n")
             print("    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
         else:
             print(f"Repertoire non trouvé {chemin_complet}")
@@ -897,7 +933,7 @@ def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar)
 
 
 # Fonction principale
-def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
+def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar, result_docker):
     # Nom du fichier CSV
     csv_filename = "D:\\workspace\\MACH2\\mach_tools\\liste_repo.csv"
     repos = getRepoFromCSV(csv_filename)
@@ -1038,6 +1074,52 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
 
     f.close()
 
+def supprimer_fichier(chemin_fichier):
+    try:
+        os.remove(chemin_fichier)
+        print(f"Le fichier '{chemin_fichier}' a été supprimé avec succès.")
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier '{chemin_fichier}' n'a pas été trouvé.")
+    except PermissionError:
+        print(f"Erreur : Vous n'avez pas les permissions nécessaires pour supprimer '{chemin_fichier}'.")
+    except Exception as e:
+        print(f"Une erreur s'est produite : {e}")
+
+def saveInventaireDocker4Projet(result_docker,repo,images):
+    fd = open(result_docker, "a")
+    print("      - saveInventaireDocker4Projet: "+repo)
+
+    for dockerfile, image in images.items():
+        print(f"Le Dockerfile '{dockerfile}' utilise l'image : {image}")
+        fd.write(repo + ";" + image+"\n")
+
+    fd.close()
+
+def analyseDocker(dir_repo):
+    result_docker = "D:\\workspace\\MACH2\\resultat_inventaire_docker.csv"
+    supprimer_fichier(result_docker)
+
+    # Nom du fichier CSV
+    csv_filename = "D:\\workspace\\MACH2\\mach_tools\\liste_repo.csv"
+    repos = getRepoFromCSV(csv_filename)
+
+    print("---------------------------------------------------------------------------------")
+    print("analyse Java Legacy - Image Docker")
+    print("liste repo: " + csv_filename)
+    print("dir_repo: " + dir_repo)
+    print("---------------------------------------------------------------------------------")
+
+    for repo in repos:
+        chemin_complet = dir_repo + "\\" + repo
+        print("- directory courant:" + repo+" - " +chemin_complet)
+
+        if os.path.isdir(chemin_complet):
+            images = extract_docker_images_from_directory(chemin_complet)
+            saveInventaireDocker4Projet(result_docker,repo,images)
+        else:
+            print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
+
+
 def menu():
     dir_repo = "D:\\workspace\\MACH2\\repo"
     org_name   = 'ugieiris'  # Remplacer par le nom de l'organisation
@@ -1053,12 +1135,13 @@ def menu():
     print("1. Analyse des repos Java Legacy")
     print("2. Analyse des repos WSO2")
     print("3. Analyse tous les types de repos")
+    print("4. Analyse les images docker")
     
     try:
         choice = int(input("Entrez le numéro de votre choix (1, 2 ou 3) : "))
          
-        fic_result = "D:\\workspace\\MACH2\\resultat_inventaire_"+str(choice)+".csv"
-   
+        fic_result    = "D:\\workspace\\MACH2\\resultat_inventaire_"+str(choice)+".csv"
+
         if choice == 1:
             analyseLegacy(token_git,dir_repo,fic_result,"w",org_name,token_sonar, url_sonar)
         elif choice == 2:
@@ -1066,6 +1149,8 @@ def menu():
         elif choice == 3:
             analyseLegacy(token_git,dir_repo,fic_result,"w",org_name,token_sonar, url_sonar)  # Exécuter la fonction pour l'action 1
             analyseWSO2(token_git, dir_repo,fic_result,"a",org_name,token_sonar, url_sonar)
+        elif choice == 4:
+            analyseDocker( dir_repo)
         else:
             print("Choix invalide. Veuillez entrer 1 ou 2.")
             menu()  # Redemander si le choix est invalide
