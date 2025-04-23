@@ -933,7 +933,7 @@ def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar)
 
 
 # Fonction principale
-def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar, result_docker):
+def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
     # Nom du fichier CSV
     csv_filename = "D:\\workspace\\MACH2\\mach_tools\\liste_repo.csv"
     repos = getRepoFromCSV(csv_filename)
