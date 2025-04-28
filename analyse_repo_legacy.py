@@ -7,6 +7,41 @@ import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
+import json
+
+def obtenir_version_vue(chemin_fichier):
+    """
+    Lit un fichier package.json et recherche la version de Vue.js.
+
+    Args:
+        chemin_fichier (str): Le chemin d'accès au fichier package.json.
+
+    Returns:
+        str or None: La version de Vue.js si trouvée, sinon None.
+    """
+    try:
+        with open(chemin_fichier, 'r') as f:
+            data = json.load(f)
+
+            dependencies = data.get('dependencies', {})
+            dev_dependencies = data.get('devDependencies', {})
+
+            version = dependencies.get('vue')
+            if version:
+                return version.lstrip('^')
+
+            version = dev_dependencies.get('vue')
+            if version:
+                return version.lstrip('^')
+
+            return None
+
+    except FileNotFoundError:
+        return f"Erreur: Le fichier '{chemin_fichier}' n'a pas été trouvé."
+    except json.JSONDecodeError:
+        return f"Erreur: Le fichier '{chemin_fichier}' n'est pas un fichier JSON valide."
+
+
 def count_files_with_extensions_hors(directory, extensions,hors):
     """
     Compte récursivement le nombre de fichiers avec des extensions spécifiques dans un répertoire.
@@ -890,6 +925,9 @@ def extract_docker_images_from_directory(directory):
 def rapportGenEntete(f):
     f.write("repo;exist;equipe;extjs;gwt;jsf;struts;jsp;ibmi;batch;lib;webapp;newsocle;archive;wso2;bdd;nbloc;nbsrvlt;nb_ecran_ext;version_extjs;nb_ecran_gwt;nb_ecran_jsf;nb_ecran_st;version_st;nb_jsp;deploiement;docker\n")
 
+def rapportGenEnteteVue(f):
+    f.write("repo;equipe;version_majeure;version;nb_ecran;vite\n")
+
 #
 def analyseWSO2(token, dir_repo,fic_result,mode,org_name,token_sonar, url_sonar):
     csv_filename = "D:\\workspace\\MACH2\\liste_wso2.csv"
@@ -1119,6 +1157,56 @@ def analyseDocker(dir_repo):
         else:
             print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
 
+def analyseVueJs(token,dir_repo,fic_result,mode,org_name ):
+    # Nom du fichier CSV
+    csv_filename = "D:\\workspace\\MACH2\\liste_vue.csv"
+    repos = getRepoFromCSV(csv_filename)
+
+    f = open(fic_result, mode)
+    rapportGenEnteteVue(f)
+
+    print("---------------------------------------------------------------------------------")
+    print("analyse Java Legacy")
+    print("liste repo: " + csv_filename)
+    print("dir_repo: " + dir_repo)
+    print("---------------------------------------------------------------------------------")
+
+    for repo in repos:
+        chemin_complet = dir_repo + "\\" + repo
+        print("- directory courant:" + repo+" - " +chemin_complet)
+        #print("chemin complet :" + chemin_complet)
+
+        team_cur    = ""
+        cur_version_maj = ""
+        cur_version = ""
+        nb_vue      = 0
+        is_vite     = False
+        is_archive  = False
+
+        if os.path.isdir(chemin_complet):
+            team_cur = check_metadata_yaml(chemin_complet)
+            extensions = ('.vue')
+            cur_version = obtenir_version_vue(chemin_complet+"\\package.json")
+            cur_version_maj = cur_version[0]
+
+            nb_vue = count_files_with_extensions(chemin_complet, extensions )
+        
+            is_vite = chercher_contenu_dans_fichier(chemin_complet+"\\package.json", "vite")
+
+            is_archive = is_repo_archived(org_name, repo, token)
+
+            f.write( repo + ";" + team_cur + ";" + cur_version_maj + ";'" + cur_version + "';" + str(nb_vue) + ";" + str(is_vite) + ";" + str(is_archive) + "\n" )
+
+
+        else:
+            print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
+        
+        print("fin repo cur")
+          
+    print("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
+    f.close()
+
+    print("Fin analyse Vue.js")
 
 def menu():
     dir_repo = "D:\\workspace\\MACH2\\repo"
@@ -1136,9 +1224,10 @@ def menu():
     print("2. Analyse des repos WSO2")
     print("3. Analyse tous les types de repos")
     print("4. Analyse les images docker")
-    
+    print("5. Analyse les repos Vue.js")
+
     try:
-        choice = int(input("Entrez le numéro de votre choix (1, 2 ou 3) : "))
+        choice = int(input("Entrez le numéro de votre choix (1, 2, 3, 4 ou 5) : "))
          
         fic_result    = "D:\\workspace\\MACH2\\resultat_inventaire_"+str(choice)+".csv"
 
@@ -1151,6 +1240,8 @@ def menu():
             analyseWSO2(token_git, dir_repo,fic_result,"a",org_name,token_sonar, url_sonar)
         elif choice == 4:
             analyseDocker( dir_repo)
+        elif choice == 5:
+            analyseVueJs(token_git,dir_repo,fic_result,"w",org_name)
         else:
             print("Choix invalide. Veuillez entrer 1 ou 2.")
             menu()  # Redemander si le choix est invalide

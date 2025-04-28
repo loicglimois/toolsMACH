@@ -3,7 +3,8 @@ setlocal enabledelayedexpansion
 
 REM Définir le répertoire de destination
 set DEST_DIR=D:\workspace\MACH2\repo
-set LST_REPO=D:\workspace\MACH2\liste_legacy.csv
+rem set LST_REPO=D:\workspace\MACH2\liste_legacy.csv
+set LST_REPO=D:\workspace\MACH2\liste_vue.csv
 
 rem set DEST_DIR=D:\workspace\MACH\gwt
 rem set LST_REPO=D:\workspace\MACH\lst_gwt.csv
