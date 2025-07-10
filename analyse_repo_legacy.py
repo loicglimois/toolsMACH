@@ -6,6 +6,7 @@ import requests
 import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+import urllib3
 
 import json
 
@@ -790,6 +791,7 @@ def get_lines_of_code(repo,group_id,artifact_id, url_sonar):
         "metricKeys": "ncloc"
     }
     # Effectuer la requête GET à l'API SonarQube
+    
     response = requests.get(url_sonar, params=params, verify=False)
 
     # Si la réponse est correcte (code 200), traiter la réponse JSON
@@ -1078,13 +1080,14 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             is_newsocle_2     = search_text_in_arborescence("dir", "-api", chemin_complet, "fin")
             is_newsocle = is_newsocle_1 or is_newsocle_2
 
-            is_archive = is_repo_archived(org_name, repo, token)
+            #is_archive = is_repo_archived(org_name, repo, token)
 
             group_id = get_group_id(chemin_complet)
             if(group_id[0]):
-                nbloc = get_lines_of_code(repo,group_id[1],group_id[2], url_sonar)
+                print(f"get nbloc by sonar")
+                # nbloc = get_lines_of_code(repo,group_id[1],group_id[2], url_sonar)
 
-            webapp      = search_webapp_in_arborescence( chemin_complet)
+            webapp = search_webapp_in_arborescence( chemin_complet)
             
             is_webapp = webapp[0]
             if is_webapp and group_id:
@@ -1106,7 +1109,8 @@ def analyseLegacy(token,dir_repo,fic_result,mode,org_name,token_sonar, url_sonar
             print(f"Le répertoire spécifié n'existe pas : {chemin_complet}")
             dir_exist = False
         
-        if(dir_exist and not is_newsocle and not is_archive ):
+        #if(dir_exist and not is_newsocle and not is_archive ):
+        if(dir_exist and not is_archive ):
             f.write(repo + ";" + str(dir_exist) + ";" + team_cur + ";" + str(is_extjs) + ";" + str(is_gwt) + ";" + str(is_jsf) + ";" + str(is_struts) + ";" + str(is_jsp) + ";" + str(is_ibmi) + ";" + str(is_batch) + ";" + str(is_lib) + ";" + str(is_webapp) + ";" + str(is_newsocle) + ";" + str(is_archive)+ ";False;" +type_bdd  + ";"+nbloc+";"+str(nb_svt)+";"+str(nombre_ecrans_ext)+";"+str(version_extjs)+";"+str(nombre_ecrans_gwt)+";"+str(nombre_ecran_jsf)+";"+str(nombre_ecrans_struts)+";"+str(version_struts)+";"+str(nb_jsp)+";"+deploiement+"\n")
         print("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - -")
 
@@ -1187,15 +1191,16 @@ def analyseVueJs(token,dir_repo,fic_result,mode,org_name ):
             team_cur = check_metadata_yaml(chemin_complet)
             extensions = ('.vue')
             cur_version = obtenir_version_vue(chemin_complet+"\\package.json")
-            cur_version_maj = cur_version[0]
+            if cur_version is not None:
+                cur_version_maj = cur_version[0]
 
             nb_vue = count_files_with_extensions(chemin_complet, extensions )
         
             is_vite = chercher_contenu_dans_fichier(chemin_complet+"\\package.json", "vite")
 
-            is_archive = is_repo_archived(org_name, repo, token)
+            #is_archive = is_repo_archived(org_name, repo, token)
 
-            f.write( repo + ";" + team_cur + ";" + cur_version_maj + ";'" + cur_version + "';" + str(nb_vue) + ";" + str(is_vite) + ";" + str(is_archive) + "\n" )
+            f.write( repo + ";" + team_cur + ";" + str(cur_version_maj) + ";'" + str(cur_version) + "';" + str(nb_vue) + ";" + str(is_vite) + ";" + str(is_archive) + "\n" )
 
 
         else:
